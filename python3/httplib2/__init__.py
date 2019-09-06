@@ -175,7 +175,7 @@ DEFAULT_TLS_VERSION = getattr(ssl, "PROTOCOL_TLS", None) or getattr(
 
 def _build_ssl_context(
     disable_ssl_certificate_validation, ca_certs, cert_file=None, key_file=None,
-    maximum_version=None, minimum_version=None,
+    maximum_version=None, minimum_version=None, key_password=None,
 ):
     if not hasattr(ssl, "SSLContext"):
         raise RuntimeError("httplib2 requires Python 3.2+ for ssl.SSLContext")
@@ -207,7 +207,7 @@ def _build_ssl_context(
     context.load_verify_locations(ca_certs)
 
     if cert_file:
-        context.load_cert_chain(cert_file, key_file)
+        context.load_cert_chain(cert_file, key_file, key_password)
 
     return context
 
@@ -959,8 +959,13 @@ class Credentials(object):
 class KeyCerts(Credentials):
     """Identical to Credentials except that
     name/password are mapped to key/cert."""
+    def add(self, key, cert, domain, password):
+        self.credentials.append((domain.lower(), key, cert, password))
 
-    pass
+    def iter(self, domain):
+        for (cdomain, key, cert, password) in self.credentials:
+            if cdomain == "" or domain == cdomain:
+                yield (key, cert, password)
 
 
 class AllHosts(object):
@@ -1241,6 +1246,7 @@ class HTTPSConnectionWithTimeout(http.client.HTTPSConnection):
         disable_ssl_certificate_validation=False,
         tls_maximum_version=None,
         tls_minimum_version=None,
+        key_password=None,
     ):
 
         self.disable_ssl_certificate_validation = disable_ssl_certificate_validation
@@ -1253,12 +1259,11 @@ class HTTPSConnectionWithTimeout(http.client.HTTPSConnection):
         context = _build_ssl_context(
             self.disable_ssl_certificate_validation, self.ca_certs, cert_file, key_file,
             maximum_version=tls_maximum_version, minimum_version=tls_minimum_version,
+            key_password=key_password,
         )
         super(HTTPSConnectionWithTimeout, self).__init__(
             host,
             port=port,
-            key_file=key_file,
-            cert_file=cert_file,
             timeout=timeout,
             context=context,
         )
@@ -1503,10 +1508,10 @@ class Http(object):
         any time a request requires authentication."""
         self.credentials.add(name, password, domain)
 
-    def add_certificate(self, key, cert, domain):
+    def add_certificate(self, key, cert, domain, password=None):
         """Add a key and cert that will be used
         any time a request requires authentication."""
-        self.certificates.add(key, cert, domain)
+        self.certificates.add(key, cert, domain, password)
 
     def clear_credentials(self):
         """Remove all the names and passwords
@@ -1778,6 +1783,7 @@ a string that contains the response entity body.
                             disable_ssl_certificate_validation=self.disable_ssl_certificate_validation,
                             tls_maximum_version=self.tls_maximum_version,
                             tls_minimum_version=self.tls_minimum_version,
+                            key_password=certs[0][2],
                         )
                     else:
                         conn = self.connections[conn_key] = connection_type(
