@@ -61,6 +61,32 @@ def test_get_via_https_key_cert():
         # Skip on 3.2
         pass
 
+def test_get_via_https_key_cert_password():
+    #  At this point I can only test
+    #  that the key and cert files are passed in
+    #  correctly to httplib. It would be nice to have
+    #  a real https endpoint to test against.
+    http = httplib2.Http(timeout=2)
+    http.add_certificate("akeyfile", "acertfile", "bitworking.org", "apassword")
+    try:
+        http.request("https://bitworking.org", "GET")
+    except AttributeError:
+        assert http.connections["https:bitworking.org"].key_file == "akeyfile"
+        assert http.connections["https:bitworking.org"].cert_file == "acertfile"
+        assert http.connections["https:bitworking.org"].key_password == "apassword"
+    except IOError:
+        # Skip on 3.2
+        pass
+
+    try:
+        http.request("https://notthere.bitworking.org", "GET")
+    except httplib2.ServerNotFoundError:
+        assert http.connections["https:notthere.bitworking.org"].key_file is None
+        assert http.connections["https:notthere.bitworking.org"].cert_file is None
+        assert http.connections["https:notthere.bitworking.org"].key_password is None
+    except IOError:
+        # Skip on 3.2
+        pass
 
 def test_ssl_invalid_ca_certs_path():
     # Test that we get an ssl.SSLError when specifying a non-existent CA

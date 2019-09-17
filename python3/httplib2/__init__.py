@@ -1267,6 +1267,9 @@ class HTTPSConnectionWithTimeout(http.client.HTTPSConnection):
             timeout=timeout,
             context=context,
         )
+        self.key_file = key_file
+        self.cert_file = cert_file
+        self.key_password = key_password
 
     def connect(self):
         """Connect to a host on a given (SSL) port."""
