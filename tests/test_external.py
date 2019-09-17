@@ -61,6 +61,7 @@ def test_get_via_https_key_cert():
         # Skip on 3.2
         pass
 
+
 def test_get_via_https_key_cert_password():
     #  At this point I can only test
     #  that the key and cert files are passed in
@@ -87,6 +88,7 @@ def test_get_via_https_key_cert_password():
     except IOError:
         # Skip on 3.2
         pass
+
 
 def test_ssl_invalid_ca_certs_path():
     # Test that we get an ssl.SSLError when specifying a non-existent CA
