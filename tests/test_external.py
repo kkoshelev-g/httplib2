@@ -90,6 +90,23 @@ def test_get_via_https_key_cert_password():
         pass
 
 
+def test_get_via_https_key_cert_password_with_pem():
+    #  At this point I can only test
+    #  that the key and cert files are passed in
+    #  correctly to httplib. It would be nice to have
+    #  a real https endpoint to test against.
+    cert_filename = "tests/testdata/test_cert.pem"  # password - 12345
+    http = httplib2.Http(timeout=2)
+    http.add_certificate(cert_filename, cert_filename, "bitworking.org", "12345")
+    http.request("https://bitworking.org", "GET")
+
+    # try invalid password
+    http = httplib2.Http(timeout=2)
+    http.add_certificate(cert_filename, cert_filename, "bitworking.org", "invalid")
+    with tests.assert_raises(ssl.SSLError):
+        http.request("https://bitworking.org", "GET")
+
+
 def test_ssl_invalid_ca_certs_path():
     # Test that we get an ssl.SSLError when specifying a non-existent CA
     # certs file.
