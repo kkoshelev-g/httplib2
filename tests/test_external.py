@@ -95,7 +95,6 @@ def test_get_via_https_key_cert_password_with_pem():
     #  that the key and cert files are passed in
     #  correctly to httplib. It would be nice to have
     #  a real https endpoint to test against.
-    cert_filename = "tests/testdata/test_cert.pem"  # password - 12345
     http = httplib2.Http(timeout=2)
     http.add_certificate(tests.CLIENT_CERTFILE, tests.CLIENT_CERTFILE,
                          "bitworking.org", tests.CLIENT_CERT_PASSWORD)
@@ -110,14 +109,15 @@ def test_get_via_https_key_cert_password_with_pem():
 
 
 def test_get_via_https_key_cert_password_with_pem_local_server():
-    with tests.MockHttpServer(ssl=True) as server:
+    with tests.MockHttpServer(use_ssl=True) as server:
         # load matching server cert to avoid verification failure
         http = httplib2.Http(ca_certs=server.certfile)
         # load client cert to be presented when server asks for it
         http.add_certificate(tests.CLIENT_CERTFILE, tests.CLIENT_CERTFILE,
                              '', tests.CLIENT_CERT_PASSWORD)
         url = 'https://localhost:{port}/'.format(port=server.port)
-        http.request(url, "GET")
+        response, content = http.request(url, "GET")
+        assert response.status == 200
         # verify that client cert was presented with matching serial number
         assert server.server.last_client_cert['serialNumber'] == tests.CLIENT_CERT_SERIAL
 

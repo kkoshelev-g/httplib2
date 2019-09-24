@@ -8,7 +8,6 @@ import httplib2
 import mock
 import os
 import pytest
-import six
 from six.moves import http_client, urllib
 import socket
 import ssl
@@ -71,9 +70,9 @@ def test_connection_refused_raises_exception(mock_socket_connect):
     mock_socket_connect.side_effect = _raise_connection_refused_exception
     http = httplib2.Http()
     http.force_exception_to_status_code = False
-    E = http_client.ResponseNotReady if six.PY2 else socket.error
-    with tests.assert_raises(E):
+    with tests.assert_raises(socket.error):
         http.request(DUMMY_URL)
+
 
 @pytest.mark.skipif(
     os.environ.get("TRAVIS_PYTHON_VERSION") in ("2.7", "pypy"),
@@ -92,7 +91,6 @@ def test_connection_refused_returns_response(mock_socket_connect):
         b"connection refused" in content
         or b"actively refused" in content
         or b"socket is not connected" in content
-        or not content
     )
     assert response.status == 400
 
