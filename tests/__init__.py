@@ -289,10 +289,10 @@ class _MockServerRequestHandler(BaseHTTPRequestHandler):
 
 class MockHttpServer():
     """This creates local http server in a separate thread."""
-    def __init__(self, handler=None, port=0, ssl=False):
+    def __init__(self, handler=None, port=0, use_ssl=False):
         self.handler = handler if handler else _MockServerRequestHandler
         self.port = port if port else _get_free_port()
-        self.ssl = ssl
+        self.use_ssl = use_ssl
         self.client_certfile = CLIENT_CERTFILE
         self.certfile = SERVER_CERTFILE
 
@@ -300,7 +300,7 @@ class MockHttpServer():
         self.server = HTTPServer(('localhost', self.port), self.handler)
 
         # wrap socket when SSL server requested
-        if self.ssl:
+        if self.use_ssl:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS)
             # ask client to present own cert for mutual auth
             context.verify_mode = ssl.CERT_OPTIONAL
