@@ -8,12 +8,14 @@ import functools
 import gzip
 import hashlib
 import httplib2
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 import random
 import re
 import shutil
 import six
 import socket
+import ssl
 import struct
 import sys
 import threading
@@ -21,6 +23,12 @@ import time
 import traceback
 import zlib
 from six.moves import http_client, queue
+
+
+SERVER_CERTFILE = 'tests/testdata/test_server_cert.pem'
+CLIENT_CERTFILE = 'tests/testdata/test_cert.pem'
+CLIENT_CERT_PASSWORD = '12345'
+CLIENT_CERT_SERIAL = '5ECC68A6F89CAA16D032C838CCDDC7E577264CDB'
 
 
 @contextlib.contextmanager
@@ -258,6 +266,61 @@ class MockHTTPBadStatusConnection(object):
     def getresponse(self):
         MockHTTPBadStatusConnection.num_calls += 1
         raise http_client.BadStatusLine("")
+
+
+def _get_free_port():
+    s = socket.socket(socket.AF_INET, type=socket.SOCK_STREAM)
+    s.bind(('localhost', 0))
+    address, port = s.getsockname()
+    s.close()
+    return port
+
+
+class _MockServerRequestHandler(BaseHTTPRequestHandler):
+    """Server request handler which always returns 200 and saves client cert info."""
+    def do_GET(self):
+        # save client cert
+        self.server.last_client_cert = self.connection.getpeercert()
+        # Process an HTTP GET request and return a response with an HTTP 200 status.
+        self.send_response(200)
+        self.end_headers()
+        return
+
+
+class MockHttpServer():
+    """This creates local http server in a separate thread."""
+    def __init__(self, handler=None, port=0, ssl=False):
+        self.handler = handler if handler else _MockServerRequestHandler
+        self.port = port if port else _get_free_port()
+        self.ssl = ssl
+        self.client_certfile = CLIENT_CERTFILE
+        self.certfile = SERVER_CERTFILE
+
+    def __enter__(self):
+        self.server = HTTPServer(('localhost', self.port), self.handler)
+
+        # wrap socket when SSL server requested
+        if self.ssl:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+            # ask client to present own cert for mutual auth
+            context.verify_mode = ssl.CERT_OPTIONAL
+            if self.client_certfile:
+                # avoid verification failure by preloading matching client cert
+                context.load_verify_locations(self.client_certfile)
+            # load server cert
+            context.load_cert_chain(self.certfile)
+            self.server.socket = context.wrap_socket(
+                sock=self.server.socket, server_side=True)
+
+        # Start running mock server in a separate thread.
+        # Daemon threads automatically shut down when the main process exits.
+        server_thread = threading.Thread(target=self.server.serve_forever)
+        server_thread.setDaemon(True)
+        server_thread.start()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.server.shutdown()
 
 
 @contextlib.contextmanager
