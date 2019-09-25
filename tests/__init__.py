@@ -270,7 +270,7 @@ class MockHTTPBadStatusConnection(object):
 
 def _get_free_port():
     s = socket.socket(socket.AF_INET, type=socket.SOCK_STREAM)
-    s.bind(('localhost', 0))
+    s.bind(("localhost", 0))
     address, port = s.getsockname()
     s.close()
     return port
@@ -297,8 +297,7 @@ class MockHttpServer():
         self.certfile = SERVER_CERTFILE
 
     def __enter__(self):
-        self.server = HTTPServer(('localhost', self.port), self.handler)
-
+        self.server = HTTPServer(("localhost", self.port), self.handler)
         # wrap socket when SSL server requested
         if self.use_ssl:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS)
@@ -311,7 +310,9 @@ class MockHttpServer():
             context.load_cert_chain(self.certfile)
             self.server.socket = context.wrap_socket(
                 sock=self.server.socket, server_side=True)
-
+            self.url = "https://localhost:{port}/".format(port=self.port)
+        else:
+            self.url = "http://localhost:{port}/".format(port=self.port)
         # Start running mock server in a separate thread.
         # Daemon threads automatically shut down when the main process exits.
         server_thread = threading.Thread(target=self.server.serve_forever)

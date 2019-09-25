@@ -68,58 +68,48 @@ def test_get_via_https_key_cert_password():
     #  correctly to httplib. It would be nice to have
     #  a real https endpoint to test against.
     http = httplib2.Http(timeout=2)
-    http.add_certificate("akeyfile", "acertfile", "bitworking.org", "apassword")
+    http.add_certificate("akeyfile", "acertfile", "", "apassword")
     try:
-        http.request("https://bitworking.org", "GET")
+        with tests.MockHttpServer(use_ssl=True) as server:
+            http.request(server.url, "GET")
     except AttributeError:
-        assert http.connections["https:bitworking.org"].key_file == "akeyfile"
-        assert http.connections["https:bitworking.org"].cert_file == "acertfile"
-        assert http.connections["https:bitworking.org"].key_password == "apassword"
+        assert http.connections["https:localhost"].key_file == "akeyfile"
+        assert http.connections["https:localhost"].cert_file == "acertfile"
+        assert http.connections["https:localhost"].key_password == "apassword"
     except IOError:
-        # Skip on 3.2
+        # Catch 'No such file or directory' since filenames are fake
         pass
 
     try:
-        http.request("https://notthere.bitworking.org", "GET")
+        http.request("https://notthere", "GET")
     except httplib2.ServerNotFoundError:
-        assert http.connections["https:notthere.bitworking.org"].key_file is None
-        assert http.connections["https:notthere.bitworking.org"].cert_file is None
-        assert http.connections["https:notthere.bitworking.org"].key_password is None
+        assert http.connections["https:notthere"].key_file is None
+        assert http.connections["https:notthere"].cert_file is None
+        assert http.connections["https:notthere"].key_password is None
     except IOError:
-        # Skip on 3.2
+        # Catch 'No such file or directory' since filenames are fake
         pass
 
 
 def test_get_via_https_key_cert_password_with_pem():
-    #  At this point I can only test
-    #  that the key and cert files are passed in
-    #  correctly to httplib. It would be nice to have
-    #  a real https endpoint to test against.
-    http = httplib2.Http(timeout=2)
-    http.add_certificate(tests.CLIENT_CERTFILE, tests.CLIENT_CERTFILE,
-                         "bitworking.org", tests.CLIENT_CERT_PASSWORD)
-    http.request("https://bitworking.org", "GET")
-
-    # try invalid password
-    http = httplib2.Http(timeout=2)
-    http.add_certificate(tests.CLIENT_CERTFILE, tests.CLIENT_CERTFILE,
-                         "bitworking.org", "invalid")
-    with tests.assert_raises(ssl.SSLError):
-        http.request("https://bitworking.org", "GET")
-
-
-def test_get_via_https_key_cert_password_with_pem_local_server():
     with tests.MockHttpServer(use_ssl=True) as server:
         # load matching server cert to avoid verification failure
         http = httplib2.Http(ca_certs=server.certfile)
         # load client cert to be presented when server asks for it
         http.add_certificate(tests.CLIENT_CERTFILE, tests.CLIENT_CERTFILE,
                              '', tests.CLIENT_CERT_PASSWORD)
-        url = 'https://localhost:{port}/'.format(port=server.port)
-        response, content = http.request(url, "GET")
+        response, content = http.request(server.url, "GET")
         assert response.status == 200
         # verify that client cert was presented with matching serial number
-        assert server.server.last_client_cert['serialNumber'] == tests.CLIENT_CERT_SERIAL
+        assert server.server.last_client_cert["serialNumber"] == tests.CLIENT_CERT_SERIAL
+
+        # try invalid password
+        http = httplib2.Http(ca_certs=server.certfile)
+        # load client cert to be presented when server asks for it
+        http.add_certificate(tests.CLIENT_CERTFILE, tests.CLIENT_CERTFILE,
+                             "", "invalid")
+        with tests.assert_raises(ssl.SSLError):
+            http.request(server.url, "GET")
 
 
 def test_ssl_invalid_ca_certs_path():
