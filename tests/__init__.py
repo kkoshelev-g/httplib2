@@ -8,7 +8,6 @@ import functools
 import gzip
 import hashlib
 import httplib2
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 import random
 import re
@@ -25,10 +24,16 @@ import zlib
 from six.moves import http_client, queue
 
 
-SERVER_CERTFILE = 'tests/testdata/test_server_cert.pem'
-CLIENT_CERTFILE = 'tests/testdata/test_cert.pem'
-CLIENT_CERT_PASSWORD = '12345'
-CLIENT_CERT_SERIAL = '5ECC68A6F89CAA16D032C838CCDDC7E577264CDB'
+DUMMY_URL = "http://127.0.0.1:1"
+DUMMY_HTTPS_URL = "https://127.0.0.1:2"
+
+tls_dir = os.path.join(os.path.dirname(__file__), "tls")
+CA_CERTS = os.path.join(tls_dir, "ca.pem")
+CA_UNUSED_CERTS = os.path.join(tls_dir, "ca_unused.pem")
+CLIENT_PEM = os.path.join(tls_dir, "client.pem")
+CLIENT_ENCRYPTED_PEM = os.path.join(tls_dir, "client_encrypted.pem")
+SERVER_PEM = os.path.join(tls_dir, "server.pem")
+SERVER_CHAIN = os.path.join(tls_dir, "server_chain.pem")
 
 
 @contextlib.contextmanager
@@ -268,66 +273,30 @@ class MockHTTPBadStatusConnection(object):
         raise http_client.BadStatusLine("")
 
 
-def _get_free_port():
-    s = socket.socket(socket.AF_INET, type=socket.SOCK_STREAM)
-    s.bind(("localhost", 0))
-    address, port = s.getsockname()
-    s.close()
-    return port
-
-
-class _MockServerRequestHandler(BaseHTTPRequestHandler):
-    """Server request handler which always returns 200 and saves client cert info."""
-    def do_GET(self):
-        # save client cert
-        self.server.last_client_cert = self.connection.getpeercert()
-        # Process an HTTP GET request and return a response with an HTTP 200 status.
-        self.send_response(200)
-        self.end_headers()
-        return
-
-
-class MockHttpServer():
-    """This creates local http server in a separate thread."""
-    def __init__(self, handler=None, port=0, use_ssl=False):
-        self.handler = handler if handler else _MockServerRequestHandler
-        self.port = port if port else _get_free_port()
-        self.use_ssl = use_ssl
-        self.client_certfile = CLIENT_CERTFILE
-        self.certfile = SERVER_CERTFILE
-
-    def __enter__(self):
-        self.server = HTTPServer(("localhost", self.port), self.handler)
-        # wrap socket when SSL server requested
-        if self.use_ssl:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-            # ask client to present own cert for mutual auth
-            context.verify_mode = ssl.CERT_OPTIONAL
-            if self.client_certfile:
-                # avoid verification failure by preloading matching client cert
-                context.load_verify_locations(self.client_certfile)
-            # load server cert
-            context.load_cert_chain(self.certfile)
-            self.server.socket = context.wrap_socket(
-                sock=self.server.socket, server_side=True)
-            self.url = "https://localhost:{port}/".format(port=self.port)
-        else:
-            self.url = "http://localhost:{port}/".format(port=self.port)
-        # Start running mock server in a separate thread.
-        # Daemon threads automatically shut down when the main process exits.
-        server_thread = threading.Thread(target=self.server.serve_forever)
-        server_thread.setDaemon(True)
-        server_thread.start()
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.server.shutdown()
-
-
 @contextlib.contextmanager
-def server_socket(fun, request_count=1, timeout=5):
+def server_socket(fun, request_count=1, timeout=5, scheme="", tls=None):
+    """Base socket server for tests.
+    Likely you want to use server_request or other higher level helpers.
+    All arguments except fun can be passed to other server_* helpers.
+
+    :param fun: fun(client_sock, tick) called after successful accept().
+    :param request_count: test succeeds after exactly this number of requests, triggered by tick(request)
+    :param timeout: seconds.
+    :param scheme: affects yielded value
+        "" - build normal http/https URI.
+        string - build normal URI using supplied scheme.
+        None - yield (addr, port) tuple.
+    :param tls:
+        None (default) - plain HTTP.
+        True - HTTPS with reasonable defaults. Likely you want httplib2.Http(ca_certs=tests.CA_CERTS)
+        string - path to custom server cert+key PEM file.
+        callable - function(context, listener, skip_errors) -> ssl_wrapped_listener
+    """
     gresult = [None]
     gcounter = [0]
+    tls_skip_errors = [
+        "TLSV1_ALERT_UNKNOWN_CA",
+    ]
 
     def tick(request):
         gcounter[0] += 1
@@ -340,7 +309,13 @@ def server_socket(fun, request_count=1, timeout=5):
     def server_socket_thread(srv):
         try:
             while gcounter[0] < request_count:
-                client, _ = srv.accept()
+                try:
+                    client, _ = srv.accept()
+                except ssl.SSLError as e:
+                    if e.reason in tls_skip_errors:
+                        return
+                    raise
+
                 try:
                     client.settimeout(timeout)
                     fun(client, tick)
@@ -363,18 +338,36 @@ def server_socket(fun, request_count=1, timeout=5):
             print(traceback.format_exc(), file=sys.stderr)
             gresult[0] = e
 
+    bind_hostname = "localhost"
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind(("localhost", 0))
+    server.bind((bind_hostname, 0))
     try:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     except socket.error as ex:
         print("non critical error on SO_REUSEADDR", ex)
     server.listen(10)
     server.settimeout(timeout)
+    server_port = server.getsockname()[1]
+    if tls is True:
+        tls = SERVER_CHAIN
+    if tls:
+        context = ssl_context()
+        if callable(tls):
+            context.load_cert_chain(SERVER_CHAIN)
+            server = tls(context, server, tls_skip_errors)
+        else:
+            context.load_cert_chain(tls)
+            server = context.wrap_socket(server, server_side=True)
+    if scheme == "":
+        scheme = "https" if tls else "http"
+
     t = threading.Thread(target=server_socket_thread, args=(server,))
     t.daemon = True
     t.start()
-    yield u"http://{0}:{1}/".format(*server.getsockname())
+    if scheme is None:
+        yield (bind_hostname, server_port)
+    else:
+        yield u"{scheme}://{host}:{port}/".format(scheme=scheme, host=bind_hostname, port=server_port)
     server.close()
     t.join()
     if gresult[0] is not None:
@@ -393,11 +386,12 @@ def server_yield(fun, **kwargs):
             if request is None:
                 break
             i += 1
-            request.client_addr = sock.getsockname()
+            request.client_sock = sock
             request.number = i
             q.put(request)
             response = six.next(g)
             sock.sendall(response)
+            request.client_sock = None
             if not tick(request):
                 break
 
@@ -413,10 +407,11 @@ def server_request(request_handler, **kwargs):
             if request is None:
                 break
             i += 1
-            request.client_addr = sock.getsockname()
+            request.client_sock = sock
             request.number = i
             response = request_handler(request=request)
             sock.sendall(response)
+            request.client_sock = None
             if not tick(request):
                 break
 
@@ -749,3 +744,11 @@ def deflate_compress(bs):
 
 def deflate_decompress(bs):
     return zlib.decompress(bs, -zlib.MAX_WBITS)
+
+
+def ssl_context(protocol=None):
+    """Workaround for old SSLContext() required protocol argument.
+    """
+    if sys.version_info < (3, 5, 3):
+        return ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    return ssl.SSLContext()

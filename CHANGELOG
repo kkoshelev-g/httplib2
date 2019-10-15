@@ -1,3 +1,8 @@
+0.14.0
+
+  Python3: PROXY_TYPE_SOCKS5 with str user/pass raised TypeError
+  https://github.com/httplib2/httplib2/pull/145
+
 0.13.1
 
   Python3: Use no_proxy
