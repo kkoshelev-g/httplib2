@@ -1983,7 +1983,7 @@ class Http(object):
                             ca_certs=self.ca_certs,
                             disable_ssl_certificate_validation=self.disable_ssl_certificate_validation,
                             ssl_version=self.ssl_version,
-                            key_password = certs[0][2],
+                            key_password=certs[0][2],
                         )
                     else:
                         conn = self.connections[conn_key] = connection_type(
